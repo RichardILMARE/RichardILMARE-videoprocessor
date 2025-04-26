@@ -1,0 +1,21 @@
+# Python
+*.pyc
+*.pyo
+__pycache__
+
+# Virtual environment
+venv/
+env/
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+
+# macOS system files
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
