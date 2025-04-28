@@ -1,8 +1,0 @@
-tkinter
-ttkthemes
-subprocess
-re
-pathlib
-queue
-datetime
-

@@ -16,6 +16,9 @@
 ### 1. 安装 FFmpeg
 请确保已经安装了 FFmpeg 7.1.1，并将其添加到系统的 PATH 环境变量中。可以从 FFmpeg 官网下载并安装：[FFmpeg 官网](https://ffmpeg.org/download.html)
 
-### 2. 安装 Python 依赖
-```bash
-pip install -r requirements.txt
+### 2. 安装 Python 
+请确保已安装python 3.13.3
+
+## 注意
+若提示main thread is not in main loop,请卸载ttkthemes后再重试。（pip uninstall ttkthemes）
+
