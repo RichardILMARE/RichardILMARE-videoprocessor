@@ -389,16 +389,74 @@ class FFmpegApp:
             self.log(f"拼接失败: {str(e)}", error=True)
             raise
 
-    def convert_to_ts(self, input_file, output_file):
-        input_file = os.path.normpath(input_file).replace("\\", "/")
-        output_file = os.path.normpath(output_file).replace("\\", "/")
-        cmd = [
-            'ffmpeg', '-i', input_file,
-            '-c', 'copy',
-            '-bsf:v', 'h264_mp4toannexb',
-            '-y', output_file
-        ]
-        self.run_command(cmd)
+
+    def convert_to_ts(self, input_file: str, output_ts: str):
+        if not os.path.isfile(input_file):
+            raise FileNotFoundError(f"Input file does not exist: {input_file}")
+        try:
+            probe_cmd = [
+                'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+                '-show_entries', 'stream=codec_name',
+                '-of', 'default=nokey=1:noprint_wrappers=1',
+                input_file
+            ]
+            self.log(f"Running ffprobe to detect audio codec: {' '.join(probe_cmd)}")
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+            audio_codec = result.stdout.strip().lower()
+            if not audio_codec:
+                self.log("No audio stream detected, proceeding with TS remux directly.")
+                input_for_ts = input_file
+            else:
+                self.log(f"Detected audio codec: {audio_codec}")
+                # List of audio codecs compatible with MPEG-TS
+                ts_supported = {'aac', 'ac3', 'dts', 'mp2', 'mp3'}
+                if audio_codec in ts_supported:
+                    self.log(f"Audio codec '{audio_codec}' is supported by MPEG-TS. Skipping re-encoding.")
+                    input_for_ts = input_file
+                else:
+                    self.log(f"Audio codec '{audio_codec}' is not supported by MPEG-TS. Re-encoding audio to AAC (192k)...")
+                    # Prepare temporary output file path for re-encoded audio
+                    base, ext = os.path.splitext(input_file)
+                    temp_file = f"{base}_reencoded.mp4"
+                    # Perform re-encoding: copy video, encode audio to AAC 192k
+                    ffmpeg_cmd = [
+                        'ffmpeg', '-y', '-i', input_file,
+                        '-c:v', 'copy',
+                        '-c:a', 'aac', '-b:a', '192k',
+                        temp_file
+                    ]
+                    self.log(f"Running ffmpeg to transcode audio: {' '.join(ffmpeg_cmd)}")
+                    subprocess.run(ffmpeg_cmd, check=True)
+                    input_for_ts = temp_file
+        except subprocess.CalledProcessError as e:
+            self.log(f"Error detecting or transcoding audio: {e}")
+            raise RuntimeError(f"Failed audio detection or transcoding: {e}")
+        except Exception as e:
+            self.log(f"Unexpected error: {e}")
+            raise
+
+        try:
+            self.log(f"Remuxing to MPEG-TS: input='{input_for_ts}', output='{output_ts}'")
+            ffmpeg_remux_cmd = [
+                'ffmpeg', '-y', '-i', input_for_ts,
+                '-c', 'copy', '-f', 'mpegts',
+                output_ts
+            ]
+            self.log(f"Running ffmpeg command: {' '.join(ffmpeg_remux_cmd)}")
+            subprocess.run(ffmpeg_remux_cmd, check=True)
+            self.log(f"Successfully created TS file: {output_ts}")
+        except subprocess.CalledProcessError as e:
+            self.log(f"Error during TS remux: {e}")
+            raise RuntimeError(f"Failed to remux to TS: {e}")
+        finally:
+            # Clean up temporary file if created
+            if 'temp_file' in locals() and os.path.isfile(temp_file):
+                try:
+                    os.remove(temp_file)
+                    self.log(f"Removed temporary file: {temp_file}")
+                except Exception as e:
+                    self.log(f"Could not remove temporary file '{temp_file}': {e}")
+
 
     def concat_ts_files(self, ts_files, output_file):
         try:
