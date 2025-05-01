@@ -1,4 +1,5 @@
 import os
+import json
 import pathlib
 import re
 import tkinter as tk
@@ -296,29 +297,95 @@ class FFmpegApp:
 
 
 
-    def burn_subtitles(self, video_path, subtitle_path, output_path, mode):
+
+
+    def burn_subtitles(self,input_file, subtitle_file, output_file, mode='balanced'):
+        def has_high_end_audio(file_path):
+            try:
+                # Use ffprobe to get audio stream info in JSON
+                cmd = [
+                    "ffprobe", "-hide_banner", "-loglevel", "error",
+                    "-select_streams", "a", "-show_streams",
+                    "-print_format", "json", file_path
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                info = json.loads(result.stdout)
+            except Exception as e:
+                print(f"Error running ffprobe: {e}")
+                return False
+            
+            streams = info.get("streams", [])
+            if not streams:
+                return False
+            
+            # Assume the first audio stream is the main audio
+            audio = streams[0]
+            codec_name = audio.get("codec_name", "").lower()
+            codec_long = audio.get("codec_long_name", "").lower()
+            profile = audio.get("profile", "").lower()
+            codec_tag = audio.get("codec_tag_string", "")
+            channels = audio.get("channels", 0)
+            tags = audio.get("tags", {}) or {}
+            
+            high_end = False
+            # Dolby TrueHD (includes Atmos)
+            if codec_name == "truehd":
+                high_end = True
+            # DTS variants (DTS-HD MA, DTS:X)
+            if codec_name in ("dts", "dca"):
+                if "dts-hd ma" in profile or "dts:x" in profile:
+                    high_end = True
+            if "dts-hd" in codec_long:
+                high_end = True
+            # Dolby Atmos (TrueHD with Atmos), indicated by A_TRUEHD tag
+            if codec_tag == "A_TRUEHD":
+                high_end = True
+            # High channel count (>=9) likely object audio or Auro-3D
+            if channels >= 9:
+                high_end = True
+            # Check tags for Auro-3D keyword
+            for key in ("title", "handler_name", "comment"):
+                if tags.get(key) and "auro" in tags[key].lower():
+                    high_end = True
+            return high_end
+
+        # Detect high-end audio
+        high_end_audio = has_high_end_audio(input_file)
+        if high_end_audio:
+            print("检测到高端音频格式，正在重新编码为 AAC (1920k)")
+
+        # Build FFmpeg command
+        subs_path = subtitle_file.replace("\\", "/").replace(":", "\\:")
+        # Use single quotes around the path to handle spaces/colons in Windows paths
+        subs_filter = f"subtitles='{subs_path}'"
+        cmd = ["ffmpeg", "-hide_banner", "-y", "-i", input_file, "-vf", subs_filter]
+
+        # Video encoding settings by mode
+        cmd += ["-c:v", "libx264"]
+        if mode == "lossless":
+            cmd += ["-preset", "veryslow","-crf", "0"]
+        elif mode == "fast":
+            cmd += ["-preset", "fast", "-crf", "28"]
+        else:  # balanced or default
+            cmd += ["-preset", "medium", "-crf", "18"]
+
+        # Audio processing
+        if high_end_audio:
+            # Re-encode audio to AAC with specified parameters
+            cmd += ["-c:a", "aac", "-b:a", "1920k", "-ac", "6", "-ar", "48000"]
+        else:
+            # Copy original audio track
+            cmd += ["-c:a", "copy"]
+
+        # Set output file
+        cmd.append(output_file)
+
+        # Execute FFmpeg
         try:
-            if os.name == 'nt':
-                video_path = video_path.replace("\\", "/")
-                subtitle_path = subtitle_path.replace("\\", "/").replace(":", "\\:")
-                output_path = output_path.replace("\\", "/")
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"FFmpeg execution failed: {e}")
 
-            filter_chain = f"subtitles='{subtitle_path}'"
-
-            cmd = ['ffmpeg', '-i', video_path, '-vf', filter_chain]
-            if mode == "lossless":
-                cmd += ['-crf', '0', '-preset', 'slower']
-            elif mode == "balanced":
-                cmd += ['-crf', '18', '-preset', 'medium']
-            else:
-                cmd += ['-crf', '28', '-preset', 'faster']
-            cmd += ['-c:a', 'copy', '-c:v', 'libx264', '-strict', '-2', output_path]
-
-            self.log(f"执行命令: {' '.join(cmd)}")
-            self.run_command(cmd)
-        except Exception as e:
-            self.log(f"烧录字幕失败: {str(e)}", error=True)
-            raise
 
 
 
