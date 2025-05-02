@@ -236,27 +236,41 @@ class FFmpegApp:
             raise
 
 
+    
+
+
     def adjust_time(self, timestamp, delay):
-        hours, minutes, seconds = timestamp.split(":")
-        seconds, milliseconds = seconds.split(".")
+        """
+        将形如 'HH:MM:SS,mmm' 或 'H:MM:SS.mmm' 的时间戳按照 delay（秒）做平移，
+        并输出与输入同样格式的时间戳。
+        """
+        # 1) 识别原始分隔符（逗号 or 点）
+        sep = "," if "," in timestamp else "."
+        # 2) 统一替换为点，方便 split
+        ts = timestamp.replace(",", ".")
+        # 拆分时分秒和毫秒
+        time_part, ms_part = ts.split(".", 1)
+        hours, minutes, seconds = time_part.split(":")
+        
+        # 转成总秒（浮点）
+        total = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(ms_part) / 1000.0
+        total += delay
+        if total < 0:
+            total = 0
+        
+        # 拆回 h,m,s,ms
+        h_new = int(total // 3600)
+        total %= 3600
+        m_new = int(total // 60)
+        total %= 60
+        s_new = int(total)
+        ms_new = int(round((total - s_new) * 1000))  # 保留三位毫秒
+        
+        # 输出时补零，并用原始 sep 连接
+        return f"{h_new:02}:{m_new:02}:{s_new:02}{sep}{ms_new:03}"
+    
 
-        # 转换成总秒数
-        total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + float(f"0.{milliseconds}")
-        total_seconds += delay  
 
-        # 确保时间不为负
-        if total_seconds < 0:
-            total_seconds = 0
-
-        # 重新计算小时、分钟、秒、毫秒
-        new_hours = int(total_seconds // 3600)
-        total_seconds %= 3600
-        new_minutes = int(total_seconds // 60)
-        new_seconds = int(total_seconds % 60)
-        new_milliseconds = int((total_seconds % 1) * 100)  # 保留两位毫秒
-
-        # 格式化输出，秒和毫秒部分确保是两位
-        return f"{new_hours}:{new_minutes:02}:{new_seconds:02}.{new_milliseconds:02}"
 
 
 
